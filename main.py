@@ -8,11 +8,29 @@ import imaplib
 import email
 import quopri
 from bs4 import BeautifulSoup
+import psutil
 import sys
 import os
 
+def is_process_running(process_name):
+    for proc in psutil.process_iter(['pid', 'name']):
+        if proc.info['name'] == process_name:
+            return True
+    return False
 
-# Функция для получения всех данных из файла accounts.txt
+def kill_process_by_name(process_name):
+    for proc in psutil.process_iter(['pid', 'name']):
+        if proc.info['name'] == process_name:
+            proc.terminate()
+
+def restart_sda(sda_path):
+    print("[INFO] Перезапуск Steam Desktop Authenticator...")
+    if is_process_running("Steam Desktop Authenticator.exe"):
+        kill_process_by_name("Steam Desktop Authenticator.exe")
+    time.sleep(5)
+    subprocess.Popen(sda_path)
+    time.sleep(5)
+
 def get_all_accounts(file_name):
     with open(file_name, 'r', encoding='utf-8') as file:
         lines = file.readlines()
@@ -20,7 +38,7 @@ def get_all_accounts(file_name):
     accounts = []
     for line in lines:
         account_data = line.strip()
-        # Пытаемся разбить на ровно 5 частей
+        # Пытаемся разбить на 5 частей:
         fields = account_data.split(":", 4)
         if len(fields) == 5:
             steam_login, steam_password, email_login, email_password, profile_link = fields
@@ -30,17 +48,26 @@ def get_all_accounts(file_name):
 
     return accounts if accounts else None
 
+def remove_account_line(steam_login, steam_password, email_login, email_password, profile_link, file_name="accounts.txt"):
+    line_to_remove = f"{steam_login}:{steam_password}:{email_login}:{email_password}:{profile_link}\n"
+    # Читаем все строки
+    with open(file_name, "r", encoding="utf-8") as f:
+        lines = f.readlines()
 
-# Функция для поиска пятизначного кода в тексте письма
+    # Перезаписываем, исключая нужную строку
+    with open(file_name, "w", encoding="utf-8") as f:
+        for line in lines:
+            if line.strip() != line_to_remove.strip():
+                f.write(line)
+
 def find_code_in_message(message):
     codes = re.findall(r'\b[A-Z0-9]{5}\b', message)
     for code in codes:
-        if code != "98009":  # Пропускаем код "98009"
+        # Пропустим код "98009"
+        if code != "98009":
             return code
     return None
 
-
-# Функция для декодирования и обработки Quoted-Printable
 def decode_email_part(part):
     if part.get('Content-Transfer-Encoding') == 'quoted-printable':
         decoded_part = quopri.decodestring(part.get_payload()).decode(part.get_content_charset() or 'utf-8')
@@ -48,8 +75,6 @@ def decode_email_part(part):
         decoded_part = part.get_payload(decode=True).decode(part.get_content_charset() or 'utf-8')
     return decoded_part
 
-
-# Функция для получения кода из почты
 def get_email_code(email_login, email_password):
     imap_server = "imap.firstmail.ltd"
     port = 993
@@ -57,7 +82,6 @@ def get_email_code(email_login, email_password):
     mail = imaplib.IMAP4_SSL(imap_server, port)
 
     try:
-        # Авторизуемся на почте
         mail.login(email_login, email_password)
         mail.select("INBOX")
 
@@ -69,7 +93,7 @@ def get_email_code(email_login, email_password):
         messages = messages[0].split()
         num_messages = len(messages)
 
-        # Проверяем последние три письма
+        # Проверяем последние три письма с конца
         for i in range(1, 4):
             if num_messages >= i:
                 status, msg = mail.fetch(messages[-i], "(RFC822)")
@@ -84,12 +108,9 @@ def get_email_code(email_login, email_password):
                     for part in email_message.walk():
                         content_type = part.get_content_type()
                         content_disposition = str(part.get("Content-Disposition"))
-
                         if "text/html" in content_type and "attachment" not in content_disposition:
                             body = decode_email_part(part)
-                            soup = BeautifulSoup(body, 'html.parser')
-                            text = soup.get_text()
-                            code_match = find_code_in_message(text)
+                            code_match = find_code_in_message(BeautifulSoup(body, 'html.parser').get_text())
                             if code_match:
                                 return code_match
                 else:
@@ -104,8 +125,6 @@ def get_email_code(email_login, email_password):
 
     return None
 
-
-# Основной скрипт для работы с Steam Desktop Authenticator
 def process_sda(steam_login, steam_password, email_login, email_password, profile_link):
     # Определяем путь к текущей директории
     if getattr(sys, 'frozen', False):  # Если скомпилирован в .exe
@@ -113,24 +132,23 @@ def process_sda(steam_login, steam_password, email_login, email_password, profil
     else:
         script_dir = os.path.dirname(os.path.abspath(__file__))
 
-    # Путь к Steam Desktop Authenticator.exe, лежащему в папке sda
+    # Путь к Steam Desktop Authenticator.exe (в папке "sda")
     sda_dir = os.path.join(script_dir, "sda")
     sda_path = os.path.join(sda_dir, "Steam Desktop Authenticator.exe")
 
-    # Проверяем, существует ли файл SDA
     if not os.path.exists(sda_path):
-        print(f"Файл Steam Desktop Authenticator.exe не найден в директории {sda_dir}.")
+        print(f"Файл Steam Desktop Authenticator.exe не найден по пути: {sda_path}")
+        return
     else:
-        print(f"Файл Steam Desktop Authenticator.exe найден, путь: {sda_path}.")
+        print(f"SDA найден: {sda_path}")
 
-    # Ищем окно SDA
+    # Пытаемся найти уже открытое окно SDA
     window = gw.getWindowsWithTitle("Steam Desktop Authenticator")
     if not window:
         subprocess.Popen(sda_path)
         time.sleep(3)
     else:
-        sda_window = window[0]
-        sda_window.activate()
+        window[0].activate()
         time.sleep(2)
 
     # Координаты элементов интерфейса SDA
@@ -147,7 +165,7 @@ def process_sda(steam_login, steam_password, email_login, email_password, profil
     enter_r_code_button = (800, 630)
     ok_r_code_button = (1110, 600)
 
-    # Начинаем добавление нового аккаунта в SDA
+    # Шаги добавления аккаунта
     pyautogui.click(ok_on_start_button)
     time.sleep(1)
     pyautogui.click(SetupNewAccount_button)
@@ -163,11 +181,12 @@ def process_sda(steam_login, steam_password, email_login, email_password, profil
     pyautogui.click(ok_first_button)
     time.sleep(3)
 
-    # Получаем код из почты
+    # Получаем код из почты (первая попытка)
     email_code = get_email_code(email_login, email_password)
     if not email_code:
-        print("Не удалось получить код из почты.")
-        return
+        print("Не удалось получить код из почты. Перезапускаем SDA и пытаемся снова...")
+        restart_sda(sda_path)
+        return process_sda(steam_login, steam_password, email_login, email_password, profile_link)
 
     # Вводим код из почты
     pyautogui.click(input_code_field)
@@ -189,24 +208,25 @@ def process_sda(steam_login, steam_password, email_login, email_password, profil
     pyautogui.hotkey('ctrl', 'c')
     time.sleep(0.5)
     window_text = pyperclip.paste()
-
     match = re.search(r'R\d+', window_text)
     if not match:
-        print("R-код не найден.")
-        return
+        print("R-код не найден. Перезапускаем SDA и пытаемся снова...")
+        restart_sda(sda_path)
+        return process_sda(steam_login, steam_password, email_login, email_password, profile_link)
+
     revocation_code = match.group()
     print(f"Найден R-код: {revocation_code}")
 
-    time.sleep(6)  # Ждём, пока придёт код на почту
-
-    pyautogui.click(ok_second_button)  # Нажимаем кнопку "OK"
+    time.sleep(6)  # Ждём, пока придёт второй код на почту
+    pyautogui.click(ok_second_button)
     time.sleep(10)
 
-    # Получаем код из почты повторно
+    # Снова получаем код из почты (вторая попытка)
     email_code = get_email_code(email_login, email_password)
     if not email_code:
-        print("Не удалось получить код из почты.")
-        return
+        print("Не удалось получить второй код из почты. Перезапускаем SDA и пытаемся снова...")
+        restart_sda(sda_path)
+        return process_sda(steam_login, steam_password, email_login, email_password, profile_link)
 
     # Вводим второй код
     pyautogui.click(input_code_field)
@@ -225,16 +245,20 @@ def process_sda(steam_login, steam_password, email_login, email_password, profil
     pyautogui.click(ok_r_code_button)
     time.sleep(1)
 
-    # Сохраняем данные в файл ready_accounts.txt
+    # Запишем данные в ready_accounts.txt
     with open("ready_accounts.txt", "a", encoding='utf-8') as file:
         file.write(f"{steam_login}:{steam_password}:{email_login}:{email_password}:{profile_link}:{revocation_code}\n")
-        print("Аккаунт добавлен в SDA и записан в ready_accounts.txt")
 
+    print("Аккаунт добавлен в SDA и записан в ready_accounts.txt")
 
-# Запускаем основной цикл
+    # Удаляем использованную строку из accounts.txt, чтобы не обрабатывать её снова
+    remove_account_line(steam_login, steam_password, email_login, email_password, profile_link, "accounts.txt")
+
 if __name__ == "__main__":
     accounts = get_all_accounts("accounts.txt")
     if accounts:
         for account_data in accounts:
             steam_login, steam_password, email_login, email_password, profile_link = account_data
             process_sda(steam_login, steam_password, email_login, email_password, profile_link)
+    else:
+        print("[INFO] Не найдены аккаунты в файле accounts.txt")
