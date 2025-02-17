@@ -38,18 +38,28 @@ def get_all_accounts(file_name):
     accounts = []
     for line in lines:
         account_data = line.strip()
-        # Пытаемся разбить на 5 частей:
-        fields = account_data.split(":", 4)
-        if len(fields) == 5:
-            steam_login, steam_password, email_login, email_password, profile_link = fields
-            accounts.append((steam_login, steam_password, email_login, email_password, profile_link))
-        else:
-            print(f"Неправильный формат строки: {account_data}")
+        if not account_data:
+            continue
+        # Разбиваем строку, минимум 4 поля (логин/пароль стима и логин/пароль почты)
+        fields = account_data.split(":")
+        if len(fields) < 4:
+            print(f"Неправильный формат строки (не хватает полей): {account_data}")
+            continue
+
+        steam_login, steam_password, email_login, email_password = fields[:4]
+        # Пятая часть (profile_link) — опциональна
+        profile_link = fields[4] if len(fields) >= 5 else None
+
+        accounts.append((steam_login, steam_password, email_login, email_password, profile_link))
 
     return accounts if accounts else None
 
 def remove_account_line(steam_login, steam_password, email_login, email_password, profile_link, file_name="accounts.txt"):
-    line_to_remove = f"{steam_login}:{steam_password}:{email_login}:{email_password}:{profile_link}\n"
+    fields_to_remove = [steam_login, steam_password, email_login, email_password]
+    if profile_link:
+        fields_to_remove.append(profile_link)
+    line_to_remove = ":".join(fields_to_remove) + "\n"
+
     # Читаем все строки
     with open(file_name, "r", encoding="utf-8") as f:
         lines = f.readlines()
@@ -247,11 +257,16 @@ def process_sda(steam_login, steam_password, email_login, email_password, profil
 
     # Запишем данные в ready_accounts.txt
     with open("ready_accounts.txt", "a", encoding='utf-8') as file:
-        file.write(f"{steam_login}:{steam_password}:{email_login}:{email_password}:{profile_link}:{revocation_code}\n")
+        # Собираем поля гибко (пятый — профиль, если есть)
+        fields_to_write = [steam_login, steam_password, email_login, email_password]
+        if profile_link:
+            fields_to_write.append(profile_link)
+        fields_to_write.append(revocation_code)
+        file.write(":".join(fields_to_write) + "\n")
 
     print("Аккаунт добавлен в SDA и записан в ready_accounts.txt")
 
-    # Удаляем использованную строку из accounts.txt, чтобы не обрабатывать её снова
+    # Удаляем использованную строку из accounts.txt
     remove_account_line(steam_login, steam_password, email_login, email_password, profile_link, "accounts.txt")
 
 if __name__ == "__main__":
