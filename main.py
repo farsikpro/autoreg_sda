@@ -40,24 +40,37 @@ def get_all_accounts(file_name):
         account_data = line.strip()
         if not account_data:
             continue
-        # Разбиваем строку, минимум 4 поля (логин/пароль стима и логин/пароль почты)
+
+        # Разбиваем сначала всё по двоеточию:
         fields = account_data.split(":")
+
+        # Проверяем, что минимум 4 поля есть
         if len(fields) < 4:
             print(f"Неправильный формат строки (не хватает полей): {account_data}")
             continue
 
-        steam_login, steam_password, email_login, email_password = fields[:4]
-        # Пятая часть (profile_link) — опциональна
-        profile_link = fields[4] if len(fields) >= 5 else None
+        steam_login = fields[0]
+        steam_password = fields[1]
+        email_login = fields[2]
+        email_password = fields[3]
 
+        # Всё, что идет после четвертого элемента, объединяем обратно в одну строку (ссылка).
+        profile_link = None
+        if len(fields) > 4:
+            profile_link = ":".join(fields[4:])
+
+        # Добавляем кортеж аккаунта
         accounts.append((steam_login, steam_password, email_login, email_password, profile_link))
 
     return accounts if accounts else None
 
 def remove_account_line(steam_login, steam_password, email_login, email_password, profile_link, file_name="accounts.txt"):
+    # Собираем поля в один список
     fields_to_remove = [steam_login, steam_password, email_login, email_password]
-    if profile_link:
+    if profile_link:  # Если ссылка существует, добавляем её как есть
         fields_to_remove.append(profile_link)
+
+    # Получаем исходную строку
     line_to_remove = ":".join(fields_to_remove) + "\n"
 
     # Читаем все строки
@@ -255,13 +268,13 @@ def process_sda(steam_login, steam_password, email_login, email_password, profil
     pyautogui.click(ok_r_code_button)
     time.sleep(1)
 
-    # Запишем данные в ready_accounts.txt
+    # Запишем данные в ready_accounts.txt.
     with open("ready_accounts.txt", "a", encoding='utf-8') as file:
-        # Собираем поля гибко (пятый — профиль, если есть)
+        # Собираем поля: (логин, пасс, логин почты, пасс почты, ссылка, R-код).
         fields_to_write = [steam_login, steam_password, email_login, email_password]
         if profile_link:
-            fields_to_write.append(profile_link)
-        fields_to_write.append(revocation_code)
+            fields_to_write.append(profile_link)  # сохраняем ссылку полностью
+        fields_to_write.append(revocation_code)   # добавляем R-код
         file.write(":".join(fields_to_write) + "\n")
 
     print("Аккаунт добавлен в SDA и записан в ready_accounts.txt")
